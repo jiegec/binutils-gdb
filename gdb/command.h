@@ -160,25 +160,25 @@ namespace detail
   template<>
   struct var_types_storage<var_string>
   {
-    using type = char *;
+    using type = std::string;
   };
 
   template<>
   struct var_types_storage<var_string_noescape>
   {
-    using type = char *;
+    using type = std::string;
   };
 
   template<>
   struct var_types_storage<var_optional_filename>
   {
-    using type = char *;
+    using type = std::string;
   };
 
   template<>
   struct var_types_storage<var_filename>
   {
-    using type = char *;
+    using type = std::string;
   };
 
   template<>
@@ -390,6 +390,17 @@ struct param_ref final: base_param_ref
     this->m_var = static_cast<void *> (v);
   }
 };
+
+/* Return true if a setting of type VAR_TYPE is backed by an std::string
+   variable.  */
+static inline bool
+var_type_uses_string (var_types var_type)
+{
+  return (var_type == var_string
+          || var_type == var_string_noescape
+          || var_type == var_optional_filename
+          || var_type == var_filename);
+}
 
 /* This structure records one command'd definition.  */
 struct cmd_list_element;
@@ -685,25 +696,25 @@ extern set_show_commands add_setshow_boolean_cmd
    cmd_list_element **show_list);
 
 extern set_show_commands add_setshow_filename_cmd
-  (const char *name, command_class theclass, char **var, const char *set_doc,
+  (const char *name, command_class theclass, std::string *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
 extern set_show_commands add_setshow_string_cmd
-  (const char *name, command_class theclass, char **var, const char *set_doc,
+  (const char *name, command_class theclass, std::string *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
 extern set_show_commands add_setshow_string_noescape_cmd
-  (const char *name, command_class theclass, char **var, const char *set_doc,
+  (const char *name, command_class theclass, std::string *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
 extern set_show_commands add_setshow_optional_filename_cmd
-  (const char *name, command_class theclass, char **var, const char *set_doc,
+  (const char *name, command_class theclass, std::string *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);

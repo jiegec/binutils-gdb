@@ -353,27 +353,22 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	*q++ = '\0';
 	newobj = (char *) xrealloc (newobj, q - newobj);
 
-        auto const var = c->var.get<var_string> ();
-	if (var == nullptr
-	    || strcmp (var, newobj) != 0)
+	auto const var = c->var.get<var_string> ();
+	if (var != std::string (newobj))
 	  {
-	    xfree (var);
-	    c->var.set<var_string> (newobj);
+	    c->var.set<var_string> (std::string (newobj));
 
 	    option_changed = 1;
 	  }
-	else
-	  xfree (newobj);
+	xfree (newobj);
       }
       break;
     case var_string_noescape:
       {
 	auto const var = c->var.get<var_string_noescape> ();
-	if (var == nullptr
-	    || strcmp (var, arg) != 0)
+	if (var != arg)
 	  {
-	    xfree (var);
-	    c->var.set<var_string_noescape> (xstrdup (arg));
+	    c->var.set<var_string_noescape> (std::string (arg));
 
 	    option_changed = 1;
 	  }
@@ -404,16 +399,14 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	  val = xstrdup ("");
 
 	auto const var = c->var.get<var_filename, var_optional_filename> ();
-	if (var == nullptr
-	    || strcmp (var, val) != 0)
+	if (var != std::string (val))
 	  {
-	    xfree (var);
-	    c->var.set<var_filename, var_optional_filename> (val);
+	    c->var.set<var_filename, var_optional_filename>
+	      (std::string (val));
 
 	    option_changed = 1;
 	  }
-	else
-	  xfree (val);
+	xfree (val);
       }
       break;
     case var_boolean:
@@ -590,18 +583,15 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	case var_string_noescape:
 	case var_filename:
 	case var_optional_filename:
+	  gdb::observers::command_param_changed.notify
+	    (name, c->var.get<var_string,
+			      var_string_noescape,
+			      var_filename,
+			      var_optional_filename> ().c_str ());
+	  break;
 	case var_enum:
-	  {
-	    const char *var;
-	    if (c->var.type () == var_enum)
-	      var = c->var.get<var_enum> ();
-	    else
-	      var = c->var.get<var_string,
-			       var_string_noescape,
-			       var_filename,
-			       var_optional_filename> ();
-	    gdb::observers::command_param_changed.notify (name, var);
-	  }
+	  gdb::observers::command_param_changed.notify
+	    (name, c->var.get<var_enum> ());
 	  break;
 	case var_boolean:
 	  {
@@ -652,24 +642,18 @@ get_setshow_command_value_string (const cmd_list_element *c)
   switch (c->var.type ())
     {
     case var_string:
-      {
-	auto const var = c->var.get<var_string> ();
-	if (var != nullptr)
-	  stb.putstr (var, '"');
-      }
+      stb.putstr (c->var.get<var_string> ().c_str (), '"');
       break;
     case var_string_noescape:
     case var_optional_filename:
     case var_filename:
+      stb.puts (c->var.get<var_string_noescape,
+			   var_optional_filename,
+			   var_filename> ().c_str ());
+      break;
     case var_enum:
       {
-	const char *var;
-	if (c->var.type () == var_enum)
-	  var = c->var.get<var_enum> ();
-	else
-	  var = c->var.get<var_string_noescape,
-			   var_optional_filename,
-			   var_filename> ();
+	const char * var = c->var.get<var_enum> ();
 	if (var != nullptr)
 	  stb.puts (var);
       }

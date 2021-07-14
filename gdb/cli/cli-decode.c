@@ -627,7 +627,7 @@ add_setshow_boolean_cmd (const char *name, enum command_class theclass, bool *va
 
 set_show_commands
 add_setshow_filename_cmd (const char *name, enum command_class theclass,
-			  char **var,
+			  std::string *var,
 			  const char *set_doc, const char *show_doc,
 			  const char *help_doc,
 			  cmd_func_ftype *set_func,
@@ -651,7 +651,7 @@ add_setshow_filename_cmd (const char *name, enum command_class theclass,
 
 set_show_commands
 add_setshow_string_cmd (const char *name, enum command_class theclass,
-			char **var,
+			std::string *var,
 			const char *set_doc, const char *show_doc,
 			const char *help_doc,
 			cmd_func_ftype *set_func,
@@ -676,7 +676,7 @@ add_setshow_string_cmd (const char *name, enum command_class theclass,
 
 set_show_commands
 add_setshow_string_noescape_cmd (const char *name, enum command_class theclass,
-				 char **var,
+				 std::string *var,
 				 const char *set_doc, const char *show_doc,
 				 const char *help_doc,
 				 cmd_func_ftype *set_func,
@@ -701,7 +701,7 @@ add_setshow_string_noescape_cmd (const char *name, enum command_class theclass,
 
 set_show_commands
 add_setshow_optional_filename_cmd (const char *name, enum command_class theclass,
-				   char **var,
+				   std::string *var,
 				   const char *set_doc, const char *show_doc,
 				   const char *help_doc,
 				   cmd_func_ftype *set_func,

@@ -468,6 +468,8 @@ add_set_or_show_cmd (const char *name,
 		     enum cmd_types type,
 		     enum command_class theclass,
 		     typename detail::var_types_storage<T>::type *var,
+		     set_param_ftype<T> set_param_func,
+		     get_param_ftype<T> get_param_func,
 		     const char *doc,
 		     struct cmd_list_element **list)
 {
@@ -475,7 +477,14 @@ add_set_or_show_cmd (const char *name,
 
   gdb_assert (type == set_cmd || type == show_cmd);
   c->type = type;
-  c->var.set_p<T> (var);
+
+  gdb_assert ((var != nullptr)
+	      != (set_param_func != nullptr && get_param_func != nullptr));
+  if (var != nullptr)
+    c->var.set_p<T> (var);
+  else
+    c->var.set_accessors<T> (set_param_func, get_param_func);
+
   /* This needs to be something besides NULL so that this isn't
      treated as a help class.  */
   c->func = empty_func;
@@ -485,9 +494,11 @@ add_set_or_show_cmd (const char *name,
 /* Add element named NAME to both the command SET_LIST and SHOW_LIST.
    CLASS is as in add_cmd.  VAR_TYPE is the kind of thing we are
    setting.  VAR is address of the variable being controlled by this
-   command.  SET_FUNC and SHOW_FUNC are the callback functions (if
-   non-NULL).  SET_DOC, SHOW_DOC and HELP_DOC are the documentation
-   strings.
+   command.  If nullptr is given as VAR, then both PARAM_SET and PARAM_GET
+   must be provided. PARAM_SET and PARAM_GET are callbacks used to access and
+   modify the underlying property, whatever its storage is. SET_FUNC and
+   SHOW_FUNC are the callback functions (if non-NULL).  SET_DOC, SHOW_DOC
+   and HELP_DOC are the documentation strings.
 
    Return the newly created set and show commands.  */
 
@@ -498,6 +509,8 @@ add_setshow_cmd_full (const char *name,
 		      typename detail::var_types_storage<T>::type *var,
 		      const char *set_doc, const char *show_doc,
 		      const char *help_doc,
+		      set_param_ftype<T> set_param_func,
+		      get_param_ftype<T> get_param_func,
 		      cmd_func_ftype *set_func,
 		      show_value_ftype *show_func,
 		      struct cmd_list_element **set_list,
@@ -518,14 +531,15 @@ add_setshow_cmd_full (const char *name,
       full_set_doc = xstrdup (set_doc);
       full_show_doc = xstrdup (show_doc);
     }
-  set = add_set_or_show_cmd<T> (name, set_cmd, theclass, var,
-				full_set_doc, set_list);
+  set = add_set_or_show_cmd<T> (name, set_cmd, theclass, var, set_param_func,
+				get_param_func, full_set_doc, set_list);
   set->doc_allocated = 1;
 
   if (set_func != NULL)
     set->func = set_func;
 
   show = add_set_or_show_cmd<T> (name, show_cmd, theclass, var,
+				 set_param_func, get_param_func,
 				 full_show_doc, show_list);
   show->doc_allocated = 1;
   show->show_value_func = show_func;
@@ -555,12 +569,34 @@ add_setshow_enum_cmd (const char *name,
 		      struct cmd_list_element **show_list)
 {
   set_show_commands commands
-    =  add_setshow_cmd_full<var_enum> (name, theclass, var,
-				       set_doc, show_doc, help_doc,
-				       set_func, show_func,
-				       set_list, show_list);
+    =  add_setshow_cmd_full<var_enum> (name, theclass, var, set_doc, show_doc,
+				       help_doc, nullptr, nullptr, set_func,
+				       show_func, set_list, show_list);
   commands.set->enums = enumlist;
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_enum_cmd (const char *name, command_class theclass,
+		      const char *const *enumlist, const char *set_doc,
+		      const char *show_doc, const char *help_doc,
+		      set_param_ftype<var_enum> set_func,
+		      get_param_ftype<var_enum> get_func,
+		      show_value_ftype *show_func,
+		      cmd_list_element **set_list,
+		      cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_enum> (name, theclass, nullptr,
+					      set_doc, show_doc, help_doc,
+					      set_func, get_func, nullptr,
+					      show_func, set_list, show_list);
+
+  cmds.set->enums = enumlist;
+
+  return cmds;
 }
 
 /* See cli-decode.h.  */
@@ -585,12 +621,38 @@ add_setshow_auto_boolean_cmd (const char *name,
   set_show_commands commands
     = add_setshow_cmd_full<var_auto_boolean> (name, theclass, var,
 					      set_doc, show_doc, help_doc,
+					      nullptr, nullptr,
 					      set_func, show_func,
 					      set_list, show_list);
 
   commands.set->enums = auto_boolean_enums;
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_auto_boolean_cmd (const char *name, command_class theclass,
+			      const char *set_doc, const char *show_doc,
+			      const char *help_doc,
+			      set_param_ftype<var_auto_boolean> set_func,
+			      get_param_ftype<var_auto_boolean> get_func,
+			      show_value_ftype *show_func,
+			      cmd_list_element **set_list,
+			      cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_auto_boolean> (name, theclass, nullptr,
+						      set_doc, show_doc,
+						      help_doc, set_func,
+						      get_func, nullptr,
+						      show_func, set_list,
+						      show_list);
+
+  cmds.set->enums = auto_boolean_enums;
+
+  return cmds;
 }
 
 /* See cli-decode.h.  */
@@ -614,12 +676,36 @@ add_setshow_boolean_cmd (const char *name, enum command_class theclass, bool *va
   set_show_commands commands
     = add_setshow_cmd_full<var_boolean> (name, theclass, var,
 					 set_doc, show_doc, help_doc,
-					 set_func, show_func,
-					 set_list, show_list);
+					 nullptr, nullptr, set_func,
+					 show_func, set_list, show_list);
 
   commands.set->enums = boolean_enums;
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_boolean_cmd (const char *name, command_class theclass,
+			 const char *set_doc, const char *show_doc,
+			 const char *help_doc,
+			 set_param_ftype<var_boolean> set_func,
+			 get_param_ftype<var_boolean> get_func,
+			 show_value_ftype *show_func,
+			 cmd_list_element **set_list,
+			 cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_boolean> (name, theclass, nullptr,
+						 set_doc, show_doc, help_doc,
+						 set_func, get_func, nullptr,
+						 show_func, set_list,
+						 show_list);
+
+  cmds.set->enums = boolean_enums;
+
+  return cmds;
 }
 
 /* Add element named NAME to both the set and show command LISTs (the
@@ -638,12 +724,36 @@ add_setshow_filename_cmd (const char *name, enum command_class theclass,
   set_show_commands commands
     = add_setshow_cmd_full<var_filename> (name, theclass, var,
 					  set_doc, show_doc, help_doc,
-					  set_func, show_func,
-					  set_list, show_list);
+					  nullptr, nullptr, set_func,
+					  show_func, set_list, show_list);
 
   set_cmd_completer (commands.set, filename_completer);
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_filename_cmd (const char *name, command_class theclass,
+			  const char *set_doc, const char *show_doc,
+			  const char *help_doc,
+			  set_param_ftype<var_filename> set_func,
+			  get_param_ftype<var_filename> get_func,
+			  show_value_ftype *show_func,
+			  cmd_list_element **set_list,
+			  cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_filename> (name, theclass, nullptr,
+						  set_doc, show_doc, help_doc,
+						  set_func, get_func, nullptr,
+						  show_func, set_list,
+						  show_list);
+
+  set_cmd_completer (cmds.set, filename_completer);
+
+  return cmds;
 }
 
 /* Add element named NAME to both the set and show command LISTs (the
@@ -662,13 +772,38 @@ add_setshow_string_cmd (const char *name, enum command_class theclass,
   set_show_commands commands
     = add_setshow_cmd_full<var_string> (name, theclass, var,
 					set_doc, show_doc, help_doc,
-					set_func, show_func,
-					set_list, show_list);
+					nullptr, nullptr, set_func,
+					show_func, set_list, show_list);
 
   /* Disable the default symbol completer.  */
   set_cmd_completer (commands.set, nullptr);
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_string_cmd (const char *name, command_class theclass,
+			const char *set_doc, const char *show_doc,
+			const char *help_doc,
+			set_param_ftype<var_string> set_func,
+			get_param_ftype<var_string> get_func,
+			show_value_ftype *show_func,
+			cmd_list_element **set_list,
+			cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_string> (name, theclass, nullptr,
+						set_doc, show_doc, help_doc,
+						set_func, get_func, nullptr,
+						show_func, set_list,
+						show_list);
+
+  /* Disable the default symbol completer.  */
+  set_cmd_completer (cmds.set, nullptr);
+
+  return cmds;
 }
 
 /* Add element named NAME to both the set and show command LISTs (the
@@ -687,13 +822,37 @@ add_setshow_string_noescape_cmd (const char *name, enum command_class theclass,
   set_show_commands commands
     = add_setshow_cmd_full<var_string_noescape> (name, theclass, var,
 						 set_doc, show_doc, help_doc,
-						 set_func, show_func,
-						 set_list, show_list);
+						 nullptr, nullptr, set_func,
+						 show_func, set_list,
+						 show_list);
 
   /* Disable the default symbol completer.  */
   set_cmd_completer (commands.set, nullptr);
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_string_noescape_cmd (const char *name, command_class theclass,
+				 const char *set_doc, const char *show_doc,
+				 const char *help_doc,
+				 set_param_ftype<var_string_noescape> set_func,
+				 get_param_ftype<var_string_noescape> get_func,
+				 show_value_ftype *show_func,
+				 cmd_list_element **set_list,
+				 cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_string_noescape>
+    (name, theclass, nullptr, set_doc, show_doc, help_doc, set_func, get_func,
+     nullptr, show_func, set_list, show_list);
+
+  /* Disable the default symbol completer.  */
+  set_cmd_completer (cmds.set, nullptr);
+
+  return cmds;
 }
 
 /* Add element named NAME to both the set and show command LISTs (the
@@ -712,12 +871,39 @@ add_setshow_optional_filename_cmd (const char *name, enum command_class theclass
   set_show_commands commands
     = add_setshow_cmd_full<var_optional_filename> (name, theclass, var,
 						   set_doc, show_doc, help_doc,
+						   nullptr, nullptr,
 						   set_func, show_func,
 						   set_list, show_list);
 		
   set_cmd_completer (commands.set, filename_completer);
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_optional_filename_cmd (const char *name, command_class theclass,
+				   const char *set_doc, const char *show_doc,
+				   const char *help_doc,
+				   set_param_ftype<var_optional_filename> set_func,
+				   get_param_ftype<var_optional_filename> get_func,
+				   show_value_ftype *show_func,
+				   cmd_list_element **set_list,
+				   cmd_list_element **show_list)
+{
+  auto cmds =
+    add_setshow_cmd_full<var_optional_filename> (name, theclass, nullptr,
+						 set_doc, show_doc, help_doc,
+						 set_func, get_func,
+						 nullptr, show_func,
+						 set_list,show_list);
+
+		
+  set_cmd_completer (cmds.set, filename_completer);
+
+  return cmds;
 }
 
 /* Completes on literal "unlimited".  Used by integer commands that
@@ -756,12 +942,36 @@ add_setshow_integer_cmd (const char *name, enum command_class theclass,
   set_show_commands commands
     = add_setshow_cmd_full<var_integer> (name, theclass, var,
 					 set_doc, show_doc, help_doc,
-					 set_func, show_func,
-					 set_list, show_list);
+					 nullptr, nullptr, set_func,
+					 show_func, set_list, show_list);
 
   set_cmd_completer (commands.set, integer_unlimited_completer);
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_integer_cmd (const char *name, command_class theclass,
+			 const char *set_doc, const char *show_doc,
+			 const char *help_doc,
+			 set_param_ftype<var_integer> set_func,
+			 get_param_ftype<var_integer> get_func,
+			 show_value_ftype *show_func,
+			 cmd_list_element **set_list,
+			 cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_integer> (name, theclass, nullptr,
+						 set_doc, show_doc, help_doc,
+						 set_func, get_func,
+						 nullptr, show_func,
+						 set_list, show_list);
+
+  set_cmd_completer (cmds.set, integer_unlimited_completer);
+
+  return cmds;
 }
 
 /* Add element named NAME to both the set and show command LISTs (the
@@ -782,12 +992,36 @@ add_setshow_uinteger_cmd (const char *name, enum command_class theclass,
   set_show_commands commands
     = add_setshow_cmd_full<var_uinteger> (name, theclass, var,
 					  set_doc, show_doc, help_doc,
-					  set_func, show_func,
-					  set_list, show_list);
+					  nullptr, nullptr, set_func,
+					  show_func, set_list, show_list);
 
   set_cmd_completer (commands.set, integer_unlimited_completer);
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_uinteger_cmd (const char *name, command_class theclass,
+			  const char *set_doc, const char *show_doc,
+			  const char *help_doc,
+			  set_param_ftype<var_uinteger> set_func,
+			  get_param_ftype<var_uinteger> get_func,
+			  show_value_ftype *show_func,
+			  cmd_list_element **set_list,
+			  cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<var_uinteger> (name, theclass, nullptr,
+						  set_doc, show_doc, help_doc,
+						  set_func, get_func,
+						  nullptr, show_func,
+						  set_list, show_list);
+
+  set_cmd_completer (cmds.set, integer_unlimited_completer);
+
+  return cmds;
 }
 
 /* Add element named NAME to both the set and show command LISTs (the
@@ -807,8 +1041,27 @@ add_setshow_zinteger_cmd (const char *name, enum command_class theclass,
 {
   return add_setshow_cmd_full<var_zinteger> (name, theclass, var,
 					     set_doc, show_doc, help_doc,
-					     set_func, show_func,
-					     set_list, show_list);
+					     nullptr, nullptr, set_func,
+					     show_func, set_list, show_list);
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_zinteger_cmd (const char *name, command_class theclass,
+			  const char *set_doc, const char *show_doc,
+			  const char *help_doc,
+			  set_param_ftype<var_zinteger> set_func,
+			  get_param_ftype<var_zinteger> get_func,
+			  show_value_ftype *show_func,
+			  cmd_list_element **set_list,
+			  cmd_list_element **show_list)
+{
+  return add_setshow_cmd_full<var_zinteger> (name, theclass, nullptr, set_doc,
+					     show_doc, help_doc,
+					     set_func, get_func, nullptr,
+					     show_func, set_list, show_list);
 }
 
 set_show_commands
@@ -826,13 +1079,40 @@ add_setshow_zuinteger_unlimited_cmd (const char *name,
   set_show_commands commands
     = add_setshow_cmd_full<var_zuinteger_unlimited> (name, theclass, var,
 						     set_doc, show_doc,
-						     help_doc, set_func,
+						     help_doc, nullptr,
+						     nullptr, set_func,
 						     show_func, set_list,
 						     show_list);
 
   set_cmd_completer (commands.set, integer_unlimited_completer);
 
   return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_zuinteger_unlimited_cmd (const char *name, command_class theclass,
+				     const char *set_doc, const char *show_doc,
+				     const char *help_doc,
+				     set_param_ftype<var_zuinteger_unlimited> set_func,
+				     get_param_ftype<var_zuinteger_unlimited> get_func,
+				     show_value_ftype *show_func,
+				     cmd_list_element **set_list,
+				     cmd_list_element **show_list)
+{
+  auto cmds
+    = add_setshow_cmd_full<var_zuinteger_unlimited> (name, theclass, nullptr,
+						     set_doc, show_doc,
+						     help_doc, set_func,
+						     get_func, nullptr,
+						     show_func, set_list,
+						     show_list);
+
+  set_cmd_completer (cmds.set, integer_unlimited_completer);
+
+  return cmds;
 }
 
 /* Add element named NAME to both the set and show command LISTs (the
@@ -852,8 +1132,27 @@ add_setshow_zuinteger_cmd (const char *name, enum command_class theclass,
 {
   return add_setshow_cmd_full<var_zuinteger> (name, theclass, var,
 					      set_doc, show_doc, help_doc,
-					      set_func, show_func,
-					      set_list, show_list);
+					      nullptr, nullptr, set_func,
+					      show_func, set_list, show_list);
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_zuinteger_cmd (const char *name, command_class theclass,
+			   const char *set_doc, const char *show_doc,
+			   const char *help_doc,
+			   set_param_ftype<var_zuinteger> set_func,
+			   get_param_ftype<var_zuinteger> get_func,
+			   show_value_ftype *show_func,
+			   cmd_list_element **set_list,
+			   cmd_list_element **show_list)
+{
+  return add_setshow_cmd_full<var_zuinteger> (name, theclass, nullptr,
+					      set_doc, show_doc, help_doc,
+					      set_func, get_func, nullptr,
+					      show_func, set_list, show_list);
 }
 
 /* Remove the command named NAME from the command list.  Return the

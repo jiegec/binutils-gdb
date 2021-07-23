@@ -125,6 +125,35 @@ typedef enum var_types
   }
 var_types;
 
+template<typename T>
+struct accessor_sigs
+{
+  using getter = T (*) ();
+  using setter = void (*) (T);
+};
+
+/* Contains a function to access a parameter.  */
+union param_getter
+{
+  typename accessor_sigs<bool>::getter get_bool;
+  typename accessor_sigs<int>::getter get_int;
+  typename accessor_sigs<unsigned int>::getter get_uint;
+  typename accessor_sigs<auto_boolean>::getter get_auto_boolean;
+  typename accessor_sigs<std::string>::getter get_string;
+  typename accessor_sigs<const char *>::getter get_const_string;
+};
+
+/* Contains a function to set a parameter.  */
+union param_setter
+{
+  typename accessor_sigs<bool>::setter set_bool;
+  typename accessor_sigs<int>::setter set_int;
+  typename accessor_sigs<unsigned int>::setter set_uint;
+  typename accessor_sigs<auto_boolean>::setter set_auto_boolean;
+  typename accessor_sigs<std::string>::setter set_string;
+  typename accessor_sigs<const char *>::setter set_const_string;
+};
+
 /* Holds implementation details for the setting_ref wrapper.  */
 namespace detail
 {
@@ -272,7 +301,107 @@ namespace detail
 	       || var_types_have_same_storage<U, Us...>::covers_type (t);
       }
   };
+
+  /* Helper templated struct used to access the appropriate getter / setter
+     for a given data type.  */
+  template<typename>
+  struct accessor_helper;
+
+  template<>
+  struct accessor_helper<bool>
+  {
+    static accessor_sigs<bool>::getter &getter(param_getter & getters)
+    {
+      return getters.get_bool;
+    }
+
+    static accessor_sigs<bool>::setter &setter(param_setter & setters)
+    {
+      return setters.set_bool;
+    }
+  };
+
+  template<>
+  struct accessor_helper<int>
+  {
+    static accessor_sigs<int>::getter &getter(param_getter & getters)
+    {
+      return getters.get_int;
+    }
+
+    static accessor_sigs<int>::setter &setter(param_setter & setters)
+    {
+      return setters.set_int;
+    }
+  };
+
+  template<>
+  struct accessor_helper<unsigned int>
+  {
+    static accessor_sigs<unsigned int>::getter &getter(param_getter & getters)
+    {
+      return getters.get_uint;
+    }
+
+    static accessor_sigs<unsigned int>::setter &setter(param_setter & setters)
+    {
+      return setters.set_uint;
+    }
+  };
+
+  template<>
+  struct accessor_helper<auto_boolean>
+  {
+    static accessor_sigs<auto_boolean>::getter &getter(param_getter & getters)
+    {
+      return getters.get_auto_boolean;
+    }
+
+    static accessor_sigs<auto_boolean>::setter &setter(param_setter & setters)
+    {
+      return setters.set_auto_boolean;
+    }
+  };
+
+  template<>
+  struct accessor_helper<std::string>
+  {
+    static accessor_sigs<std::string>::getter &getter(param_getter & getters)
+    {
+      return getters.get_string;
+    }
+
+    static accessor_sigs<std::string>::setter &setter(param_setter & setters)
+    {
+      return setters.set_string;
+    }
+  };
+
+  template<>
+  struct accessor_helper<const char *>
+  {
+    static accessor_sigs<const char *>::getter &getter(param_getter & getters)
+    {
+      return getters.get_const_string;
+    }
+
+    static accessor_sigs<const char *>::setter &setter(param_setter & setters)
+    {
+      return setters.set_const_string;
+    }
+  };
+
 } /* namespace detail */
+
+/* Alias for the getter and setter function signatures.  */
+
+template<var_types T>
+using get_param_ftype =
+  typename accessor_sigs<typename detail::var_types_storage<T>::type>::getter;
+
+template<var_types T>
+using set_param_ftype =
+  typename accessor_sigs<typename detail::var_types_storage<T>::type>::setter;
 
 /* Abstraction that contains access to data that can be set or shown.
 
@@ -317,10 +446,20 @@ struct base_param_ref
   {
     gdb_assert (detail::var_types_have_same_storage<Ts...>::covers_type
                 (this->m_var_type));
-    return *get_p<Ts...> ();
+
+    auto getter = detail::accessor_helper<
+      typename detail::var_types_have_same_storage<Ts...>::type>::getter
+        (const_cast<base_param_ref *> (this)->m_getter);
+
+    if (getter != nullptr)
+      return (*getter) ();
+    else
+      return *get_p<Ts...> ();
   }
 
-  /* Sets the value V to the underlying buffer.
+  /* Sets the value referenced by the param to V.  If we have a user-provided
+     setter, use it to set the setting, otherwise set it to the internally
+     referenced buffer.
 
      If one template argument is given, it must be the VAR_TYPE of the current
      instance.  This is enforced at runtime.
@@ -330,35 +469,67 @@ struct base_param_ref
      be of the type of one of the template parameters (this is checked at
      runtime).  */
   template<var_types... Ts,
-           typename = gdb::Requires<
+	   typename = gdb::Requires<
              detail::var_types_have_same_storage<Ts...>>>
   void set (typename detail::var_types_have_same_storage<Ts...>::type v)
   {
     /* Check that the current instance is of one of the supported types for
-       this instantiation.  */
+       this instantiating.  */
     gdb_assert (detail::var_types_have_same_storage<Ts...>::covers_type
-                (this->m_var_type));
+		(this->m_var_type));
 
-    gdb_assert (!this->empty ());
-    *static_cast<typename detail::var_types_have_same_storage<Ts...>::type *>
-      (this->m_var) = v;
+    auto setter = detail::accessor_helper<
+      typename detail::var_types_have_same_storage<Ts...>::type>::setter
+      (this->m_setter);
+
+    if (setter != nullptr)
+      (*setter) (v);
+    else
+      {
+	gdb_assert (!this->empty ());
+	*static_cast<
+	  typename detail::var_types_have_same_storage<Ts...>::type *>
+	  (this->m_var) = v;
+      }
   }
 
-  /* A setting is valid (can be evaluated to true) if it contains a valid
-     reference to a memory buffer.  */
-  explicit operator bool () const
+  /* Set the user provided setter and getter functions.  */
+  template<var_types T>
+  void
+  set_accessors (set_param_ftype<T> setter,
+		 get_param_ftype<T> getter)
   {
-    return !this->empty ();
+    m_var_type = T;
+    detail::accessor_helper<
+      typename detail::var_types_storage<T>::type>::setter
+      (this->m_setter) = setter;
+    detail::accessor_helper<
+      typename detail::var_types_storage<T>::type>::getter
+      (this->m_getter) = getter;
+  }
+
+  /* A setting is valid (can be evaluated to true) if it contains user
+     provided getter and setter or has a pointer set to a setting.  */
+  explicit operator bool() const
+  {
+    return (m_getter.get_bool != nullptr && m_setter.set_bool != nullptr)
+	   || !this->empty();
   }
 
 protected:
-  /* The type of the variable M_VAR is pointing to.  If M_VAR is nullptr,
-     M_VAR_TYPE is ignored.  */
+  /* The type of the variable M_VAR is pointing to.  If M_VAR is nullptr or if
+     m_getter and m_setter are nullptr, M_VAR_TYPE is ignored.  */
   var_types m_var_type { var_boolean };
 
   /* Pointer to the enclosed variable.  The type of the variable is encoded
      in M_VAR_TYPE.  Can be nullptr.  */
   void *m_var { nullptr };
+
+  /* Pointer to a user provided getter.  */
+  union param_getter m_getter { .get_bool = nullptr };
+
+  /* Pointer to a user provided setter.  */
+  union param_setter m_setter { .set_bool = nullptr };
 
   /* Indicates if the current instance has a underlying buffer.  */
   bool empty () const
@@ -683,10 +854,24 @@ extern set_show_commands add_setshow_enum_cmd
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
+extern set_show_commands add_setshow_enum_cmd
+  (const char *name, command_class theclass, const char *const *enumlist,
+   const char *set_doc, const char *show_doc,
+   const char *help_doc, set_param_ftype<var_enum> set_func,
+   get_param_ftype<var_enum> get_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
 extern set_show_commands add_setshow_auto_boolean_cmd
   (const char *name, command_class theclass, auto_boolean *var,
    const char *set_doc, const char *show_doc, const char *help_doc,
    cmd_func_ftype *set_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
+extern set_show_commands add_setshow_auto_boolean_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_auto_boolean> set_func,
+   get_param_ftype<var_auto_boolean> get_func, show_value_ftype *show_func,
    cmd_list_element **set_list, cmd_list_element **show_list);
 
 extern set_show_commands add_setshow_boolean_cmd
@@ -695,15 +880,36 @@ extern set_show_commands add_setshow_boolean_cmd
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
+extern set_show_commands add_setshow_boolean_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_boolean> set_func,
+   get_param_ftype<var_boolean> get_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
 extern set_show_commands add_setshow_filename_cmd
   (const char *name, command_class theclass, std::string *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
+extern set_show_commands add_setshow_filename_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_filename> set_func,
+   get_param_ftype<var_filename> get_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
 extern set_show_commands add_setshow_string_cmd
   (const char *name, command_class theclass, std::string *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
+   show_value_ftype *show_func, cmd_list_element **set_list,
+   cmd_list_element **show_list);
+
+extern set_show_commands add_setshow_string_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_string> set_func, get_param_ftype<var_string> get_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
@@ -713,9 +919,24 @@ extern set_show_commands add_setshow_string_noescape_cmd
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
+extern set_show_commands add_setshow_string_noescape_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_string_noescape> set_func,
+   get_param_ftype<var_string_noescape> get_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
 extern set_show_commands add_setshow_optional_filename_cmd
   (const char *name, command_class theclass, std::string *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
+   show_value_ftype *show_func, cmd_list_element **set_list,
+   cmd_list_element **show_list);
+
+extern set_show_commands add_setshow_optional_filename_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_optional_filename> set_func,
+   get_param_ftype<var_optional_filename> get_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
@@ -725,10 +946,24 @@ extern set_show_commands add_setshow_integer_cmd
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
+extern set_show_commands add_setshow_integer_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_integer> set_func,
+   get_param_ftype<var_integer> get_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
 extern set_show_commands add_setshow_uinteger_cmd
   (const char *name, command_class theclass, unsigned int *var,
    const char *set_doc, const char *show_doc, const char *help_doc,
    cmd_func_ftype *set_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
+extern set_show_commands add_setshow_uinteger_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_uinteger> set_func,
+   get_param_ftype<var_uinteger> get_func, show_value_ftype *show_func,
    cmd_list_element **set_list, cmd_list_element **show_list);
 
 extern set_show_commands add_setshow_zinteger_cmd
@@ -737,15 +972,37 @@ extern set_show_commands add_setshow_zinteger_cmd
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 
+extern set_show_commands add_setshow_zinteger_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_zinteger> set_func,
+   get_param_ftype<var_zinteger> get_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
 extern set_show_commands add_setshow_zuinteger_cmd
   (const char *name, command_class theclass, unsigned int *var,
    const char *set_doc, const char *show_doc, const char *help_doc,
    cmd_func_ftype *set_func, show_value_ftype *show_func,
    cmd_list_element **set_list, cmd_list_element **show_list);
 
+extern set_show_commands add_setshow_zuinteger_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_zuinteger> set_func,
+   get_param_ftype<var_zuinteger> get_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
 extern set_show_commands add_setshow_zuinteger_unlimited_cmd
   (const char *name, command_class theclass, int *var, const char *set_doc,
    const char *show_doc, const char *help_doc, cmd_func_ftype *set_func,
+   show_value_ftype *show_func, cmd_list_element **set_list,
+   cmd_list_element **show_list);
+
+extern set_show_commands add_setshow_zuinteger_unlimited_cmd
+  (const char *name, command_class theclass, const char *set_doc,
+   const char *show_doc, const char *help_doc,
+   set_param_ftype<var_zuinteger_unlimited> set_func,
+   get_param_ftype<var_zuinteger_unlimited> get_func,
    show_value_ftype *show_func, cmd_list_element **set_list,
    cmd_list_element **show_list);
 

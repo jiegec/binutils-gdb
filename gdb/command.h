@@ -129,7 +129,7 @@ template<typename T>
 struct accessor_sigs
 {
   using getter = T (*) ();
-  using setter = void (*) (T);
+  using setter = bool (*) (T);
 };
 
 /* Contains a function to access a parameter.  */
@@ -471,7 +471,7 @@ struct base_param_ref
   template<var_types... Ts,
 	   typename = gdb::Requires<
              detail::var_types_have_same_storage<Ts...>>>
-  void set (typename detail::var_types_have_same_storage<Ts...>::type v)
+  bool set (typename detail::var_types_have_same_storage<Ts...>::type v)
   {
     /* Check that the current instance is of one of the supported types for
        this instantiating.  */
@@ -483,13 +483,15 @@ struct base_param_ref
       (this->m_setter);
 
     if (setter != nullptr)
-      (*setter) (v);
+      return (*setter) (v);
     else
       {
 	gdb_assert (!this->empty ());
+	bool changed = (this->get<Ts...> () != v);
 	*static_cast<
 	  typename detail::var_types_have_same_storage<Ts...>::type *>
 	  (this->m_var) = v;
+	return changed;
       }
   }
 

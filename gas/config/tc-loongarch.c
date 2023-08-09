@@ -351,7 +351,7 @@ loongarch_after_parse_args ()
     }
 
   /* Init lp64 registers alias.  */
-  if (LARCH_opts.ase_lp64)
+  if (LARCH_opts.ase_lp64 || LARCH_opts.ase_ilp32)
     {
       r_abi_names = loongarch_r_lp64_name;
       for (i = 0; i < ARRAY_SIZE (loongarch_r_lp64_name); i++)
@@ -363,7 +363,7 @@ loongarch_after_parse_args ()
     }
 
   /* Init float-lp64 registers alias */
-  if ((LARCH_opts.ase_sf || LARCH_opts.ase_df) && LARCH_opts.ase_lp64)
+  if ((LARCH_opts.ase_sf || LARCH_opts.ase_df) && (LARCH_opts.ase_lp64 || LARCH_opts.ase_ilp32))
     {
       f_abi_names = loongarch_f_lp64_name;
       for (i = 0; i < ARRAY_SIZE (loongarch_f_lp64_name); i++)

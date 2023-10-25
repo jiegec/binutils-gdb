@@ -18,6 +18,8 @@
 
 * Add support for Cortex-X4 for AArch64.
 
+* Add support for LoongArch V1.1 instructions.
+
 Changes in 2.41:
 
 * Add support for the KVX instruction set.

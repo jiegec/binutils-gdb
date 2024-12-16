@@ -112,6 +112,9 @@ const char EXP_CHARS[] = "eE";
 /* or    0d1.2345e12.  */
 const char FLT_CHARS[] = "rRsSfFdDxXpP";
 
+/* The dwarf2 data alignment, adjusted for 32 or 64 bit.  */
+int loongarch_cie_data_alignment;
+
 const char md_shortopts[] = "O::g::G:";
 
 static const char default_arch[] = DEFAULT_ARCH;
@@ -535,6 +538,8 @@ md_begin ()
   /* FIXME: expressionS use 'offsetT' as constant,
    * we want this is 64-bit type.  */
   assert (8 <= sizeof (offsetT));
+
+  loongarch_cie_data_alignment = LARCH_opts.ase_lp64 ? (-8) : (-4);
 }
 
 /* Called just before the assembler exits.  */
